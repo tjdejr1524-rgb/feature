@@ -1,0 +1,45 @@
+name: Build KPM
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup NDK
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+          unzip android-ndk-r26d-linux.zip
+
+      - name: Setup KernelPatch
+        run: git clone https://github.com/bmax121/KernelPatch.git
+
+      - name: Fix Source Code
+        run: |
+          # 1. HOOK_NOT_HOOK 에러 수정 및 헤더 추가
+          sed -i 's/HOOK_NOT_HOOK/HOOK_NO_ERR/g' src/mod_main.c
+          sed -i 's|#include "mod_main.h"|#include <hook.h>\n#include <linux/mm.h>\n#include "mod_main.h"|g' src/mod_main.c
+          
+          # 2. debugfs 키워드 추가 및 개수 변경
+          sed -i 's/{ .keyword = "module", .len = 0 },/{ .keyword = "module", .len = 0 },\n        { .keyword = "debugfs", .len = 0 },/g' src/mod_main.c
+          sed -i 's/static size_t num_keywords = 2;/static size_t num_keywords = 3;/g' src/mod_main.c
+          
+          # 3. mountinfo 변조(true)를 완전 삭제(false)로 변경
+          sed -i 's/filter_output(m, old_count, true);/filter_output(m, old_count, false);/g' src/mod_main.c
+
+      - name: Build KPM
+        run: |
+          export NDK_PATH=$PWD/android-ndk-r26d
+          export KP_DIR=$PWD/KernelPatch
+          git clone https://github.com/liankong233/KPM-Build-Anywhere.git
+          cd KPM-Build-Anywhere
+          cp ../src/mod_main.c .
+          cp ../src/mod_main.h .
+          sed -i 's/hello/mod_main/g' Makefile
+          make
+
+      - name: Upload KPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-kpm
+          path: KPM-Build-Anywhere/*.kpm
